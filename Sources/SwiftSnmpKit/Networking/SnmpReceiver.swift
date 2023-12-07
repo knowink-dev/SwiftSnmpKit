@@ -31,7 +31,10 @@ class SnmpReceiver: ChannelInboundHandler {
             SnmpError.log("SnmpSender not initialized")
             return
         }
-        if let snmpMessage = SnmpV2Message(data: Data(data)) {
+        if let snmpMessage = SnmpV1Message(data: Data(data)) {
+            SnmpError.debug(snmpMessage.debugDescription)
+            snmpSender.received(message: snmpMessage)
+        } else if let snmpMessage = SnmpV2Message(data: Data(data)) {
             SnmpError.debug(snmpMessage.debugDescription)
             snmpSender.received(message: snmpMessage)
         } else if let snmpMessage = SnmpV3Message(data: Data(data)) {
