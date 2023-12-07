@@ -95,7 +95,7 @@ public struct SnmpV1Message: AsnData, CustomDebugStringConvertible {
             return nil
         }
         self.version = snmpVersion
-        if snmpVersion != .v2c {
+        if snmpVersion != .v1 {
             return nil
         }
         guard contents.count == 3 else {
