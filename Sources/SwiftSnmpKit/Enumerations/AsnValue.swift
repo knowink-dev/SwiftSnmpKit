@@ -269,7 +269,7 @@ public enum AsnValue: Equatable, CustomStringConvertible, AsnData {
             throw SnmpError.badLength
         }
     }
-    init(data: Data) throws {
+    public init(data: Data) throws {
         guard data.count > 0 else {
             throw SnmpError.badLength
         }
