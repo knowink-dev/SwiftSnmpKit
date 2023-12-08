@@ -6,10 +6,11 @@ A Swift Package for making SNMP (Simple Network Management Protocol) requests to
 
 SwiftSnmpKit supports the following SNMP versions:
 
-1. SNMPv2c (with community-based authentication)
-2. SNMPv3 no authentication no privacy
-3. SNMPv3 authentication no privacy
-4. SNMPv3 authentication and privacy
+1. SNMPv1 (with community-based authentication)
+2. SNMPv2c (with community-based authentication)
+3. SNMPv3 no authentication no privacy
+4. SNMPv3 authentication no privacy
+5. SNMPv3 authentication and privacy
 
 Only SNMP queries to UDP port 161 are supported.  SNMP traps or informs to UDP port 162 are not supported.  TCP transport is not supported.
 
