@@ -25,7 +25,7 @@ public struct SnmpVariableBinding: Equatable, CustomStringConvertible {
     /// - Parameter data: Data as received over the network in a SNMP reply
     init(data: Data) throws {
         let objectName = try AsnValue(data: data)
-        let nameLength = try AsnValue.pduLength(data: data)
+        _ = try AsnValue.pduLength(data: data)
         guard case .sequence(let sequence) = objectName else {
             SnmpError.log("Expected Sequence got \(objectName)")
             throw SnmpError.unexpectedSnmpPdu

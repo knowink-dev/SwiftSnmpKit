@@ -12,7 +12,7 @@ import NIOPosix
 /// SnmpSender is a singleton class which handles sending and receiving SNMP messages
 /// It maintains several internal state tables to record SNMP
 /// EngineIDs, EngineBoots, and BootDates gathered from SNMPv3 reports
-public class SnmpSender/*: ChannelInboundHandler*/ {
+public actor SnmpSender/*: ChannelInboundHandler*/ {
     public typealias InboundIn = AddressedEnvelope<ByteBuffer>
     
     static let snmpPort = 161
@@ -33,6 +33,14 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
 
     // maps messageID to decryption key
     internal var localizedKeys: [Int32:[UInt8]] = [:]
+    
+    func getLocalizedKey(messageID: Int32) -> [UInt8]? {
+        localizedKeys[messageID]
+    }
+    
+    func setLocalizedKey(messageID: Int32, decryptionKey: [UInt8]?) {
+        localizedKeys[messageID] = decryptionKey
+    }
     
     /// This is a record of outstanding SNMP requests and the continuation
     /// that must be called when the reply is received.  The continuation
@@ -84,7 +92,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         snmpRequests[requestId] = continuation
         Task.detached {
             try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-            self.triggerTimeoutForRequestIfNeeded(id: requestId)
+            await self.triggerTimeoutForRequestIfNeeded(id: requestId)
         }
     }
     
@@ -195,7 +203,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         guard let remoteAddress = try? SocketAddress(ipAddress: host, port: SnmpSender.snmpPort) else {
             return .failure(SnmpError.invalidAddress)
         }
-        let data = snmpMessage.asnData
+        let data = await snmpMessage.asnData
         let buffer = channel.allocator.buffer(bytes: data)
         let envelope = AddressedEnvelope(remoteAddress: remoteAddress, data: buffer)
         do {
@@ -230,12 +238,12 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         }
         // attempt #1 (may get engineId)
         let result1 = await self.sendV3(host: host, userName: userName, pduType: pduType, oid: oid, authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword)
-        guard case let .failure(_) = result1 else {
+        guard case .failure = result1 else {
             return result1
         }
         // attempt #2 (may update time interval)
         let result2 = await self.sendV3(host: host, userName: userName, pduType: pduType, oid: oid, authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword)
-        guard case let .failure(_) = result2 else {
+        guard case .failure = result2 else {
             return result2
         }
         // attempt #3 (last chance!)
@@ -289,7 +297,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let dateInterval = DateInterval(start: bootDate, end: Date())
         let engineTime = Int(dateInterval.duration)
         
-        guard var snmpMessage = SnmpV3Message(engineId: engineId, userName: userName, type: pduType, variableBindings: [variableBinding], authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword, engineBoots: engineBoots, engineTime: engineTime) else {
+        guard let snmpMessage = SnmpV3Message(engineId: engineId, userName: userName, type: pduType, variableBindings: [variableBinding], authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword, engineBoots: engineBoots, engineTime: engineTime) else {
             return .failure(SnmpError.unexpectedSnmpPdu)
         }
 
