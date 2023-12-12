@@ -7,6 +7,8 @@
 
 import Foundation
 public enum SnmpError: Error, LocalizedError {
+    case sleepFailed
+    
     case badLength
     case invalidOid
     case unsupportedType
@@ -26,7 +28,8 @@ public enum SnmpError: Error, LocalizedError {
     
     public var errorDescription: String? {
         switch self {
-            
+        case .sleepFailed:
+            return "Snmp Timeout Sleep "
         case .badLength:
             return "SnmpBadLengthError"
         case .invalidOid:

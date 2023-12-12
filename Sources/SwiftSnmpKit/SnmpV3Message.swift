@@ -326,35 +326,37 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
     
     /// Outputs the ASN.1 encoding for the security parameters field
     private var usmSecurityParametersAsn: AsnValue {
-        let authenticationParametersAsn: AsnValue
-        switch self.authenticationType {
-        case .noAuth:
-            return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
-        case .yes:
-            SnmpError.log(".yes is invalid for generating authentication, trying to continue")
-            return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
-        case .md5:
-            fatalError("not implemented")
-        case .sha1:
-            let blankData = asnBlankAuth.asnData
-            guard let password = authPassword else {
-                SnmpError.log("Unable to generate authentication data without a password")
+        get async {
+            let authenticationParametersAsn: AsnValue
+            switch self.authenticationType {
+            case .noAuth:
                 return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
-            }
-            let authData =
-            SnmpV3Message.sha1Parameters(messageData: blankData, password: password, engineId: self.engineId)
-            let authenticationParameters = AsnValue(octetStringData: authData)
-            return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,authenticationParameters,privacyParametersAsn])
-        case .sha256:
-            let blankData = asnBlankAuth.asnData
-            guard let password = authPassword else {
-                SnmpError.log("Unable to generate authentication data without a password")
+            case .yes:
+                SnmpError.log(".yes is invalid for generating authentication, trying to continue")
                 return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
+            case .md5:
+                fatalError("not implemented")
+            case .sha1:
+                let blankData = await asnBlankAuth.asnData
+                guard let password = authPassword else {
+                    SnmpError.log("Unable to generate authentication data without a password")
+                    return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
+                }
+                let authData =
+                SnmpV3Message.sha1Parameters(messageData: blankData, password: password, engineId: self.engineId)
+                let authenticationParameters = AsnValue(octetStringData: authData)
+                return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,authenticationParameters,privacyParametersAsn])
+            case .sha256:
+                let blankData = await asnBlankAuth.asnData
+                guard let password = authPassword else {
+                    SnmpError.log("Unable to generate authentication data without a password")
+                    return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
+                }
+                let authData =
+                SnmpV3Message.sha256Parameters(messageData: blankData, password: password, engineId: self.engineId)
+                let authenticationParameters = AsnValue(octetStringData: authData)
+                return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,authenticationParameters,privacyParametersAsn])
             }
-            let authData =
-            SnmpV3Message.sha256Parameters(messageData: blankData, password: password, engineId: self.engineId)
-            let authenticationParameters = AsnValue(octetStringData: authData)
-            return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,authenticationParameters,privacyParametersAsn])
         }
     }
 
@@ -363,7 +365,7 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
     /// Takes data from a SNMP reply and uses it to create a SNMP message data structure.  Returns nil if the data cannot form a complete SNMP reply data structure.
     /// This initializer is not designed for creating a SNMP message for transmission.
     /// - Parameter data: The network contents of a UDP reply, with the IP and UDP headers already stripped off.
-    public init?(data: Data) {
+    public init?(data: Data) async {
         guard let outerSequence = try? AsnValue(data: data) else {
             SnmpError.log("Outer ASN is not a sequence")
             return nil
@@ -485,11 +487,11 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
                 SnmpError.log("Invalid initialization vector \(data)")
                 return nil
             }
-            guard let localizedKey = SnmpSender.shared?.localizedKeys[messageId] else {
+            guard let localizedKey = await SnmpSender.shared?.localizedKeys[messageId] else {
                 SnmpError.log("Unable to find decryption key for messageId \(messageId)")
                 return nil
             }
-            SnmpSender.shared?.localizedKeys[messageId] = nil
+            await SnmpSender.shared?.updateLocalizedKeys(messageID: messageId, withData: nil)
             let msgDataTemp: Data // should be in do but leaving it out here for debugging access
             do {
                 let aes = try AES(key: localizedKey, blockMode: CFB(iv: [UInt8](privInitializationVector)), padding: .noPadding)
@@ -538,12 +540,17 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
 }
 extension SnmpV3Message: AsnData {
     internal var asn: AsnValue {
-        let result = AsnValue.sequence([version.asn,msgGlobalAsn,msgSecurityParametersAsn,scopedPduAsn])
-        return result
+        get async {
+            await AsnValue.sequence([version.asn,msgGlobalAsn,msgSecurityParametersAsn,scopedPduAsn])
+        }
     }
+    
     internal var asnData: Data {
-        return asn.asnData
+        get async {
+            await asn.asnData
+        }
     }
+    
     private var msgGlobalAsn: AsnValue {
         let messageIdAsn = AsnValue.integer(Int64(messageId))
         let maxSizeAsn = AsnValue.integer(Int64(maxSize))
@@ -551,33 +558,41 @@ extension SnmpV3Message: AsnData {
         let msgGlobalAsn = AsnValue.sequence([messageIdAsn,maxSizeAsn,flagsAsn,securityModelAsn])
         return msgGlobalAsn
     }
+    
     private var scopedPduAsn: AsnValue {
-        if privPassword == nil {
-            return AsnValue.sequence([engineIdAsn,contextNameAsn,snmpPdu.asn])
-        } else {
-            // we need to encrypt
-            let scopedPduData = AsnValue.sequence([engineIdAsn,contextNameAsn,snmpPdu.asn]).asnData
-            do {
-                let key: [UInt8] = [UInt8](localizedPrivKey[0..<16])
-                let aes = try AES(key: key, blockMode: CFB(iv: [UInt8](privInitializationVector)), padding: .noPadding)
-                let encryptedPdu = try aes.encrypt([UInt8](scopedPduData))
-                let result = AsnValue.init(octetStringData: Data(encryptedPdu))
-                SnmpSender.shared?.localizedKeys[self.messageId] = key
-                return result
-            } catch(let error) {
-                SnmpError.log("Failed to encrypt data: \(error)")
-                fatalError("this is bad")
+        get async {
+            if privPassword == nil {
+                return AsnValue.sequence([engineIdAsn,contextNameAsn,snmpPdu.asn])
+            } else {
+                // we need to encrypt
+                let scopedPduData = AsnValue.sequence([engineIdAsn,contextNameAsn,snmpPdu.asn]).asnData
+                do {
+                    let key: [UInt8] = [UInt8](localizedPrivKey[0..<16])
+                    let aes = try AES(key: key, blockMode: CFB(iv: [UInt8](privInitializationVector)), padding: .noPadding)
+                    let encryptedPdu = try aes.encrypt([UInt8](scopedPduData))
+                    let result = AsnValue.init(octetStringData: Data(encryptedPdu))
+                    await SnmpSender.shared?.updateLocalizedKeys(messageID: messageId, withData: key)
+                    return result
+                } catch(let error) {
+                    SnmpError.log("Failed to encrypt data: \(error)")
+                    fatalError("this is bad")
+                }
             }
         }
     }
-    private var msgSecurityParametersAsn: AsnValue { return AsnValue(octetStringData: usmSecurityParametersAsn.asnData)
+    
+    private var msgSecurityParametersAsn: AsnValue {
+        get async {
+            await AsnValue(octetStringData: usmSecurityParametersAsn.asnData)
+        }
     }
 }
 /*This extension is for returning our ASN with the authentication parameters set to 12 octets of 0, so authentication can be calculated*/
 extension SnmpV3Message {
     internal var asnBlankAuth: AsnValue {
-        let result = AsnValue.sequence([version.asn,msgGlobalAsn,msgSecurityParametersAsnBlankAuth,scopedPduAsn])
-        return result
+        get async {
+            await AsnValue.sequence([version.asn,msgGlobalAsn,msgSecurityParametersAsnBlankAuth,scopedPduAsn])
+        }
     }
     private var msgSecurityParametersAsnBlankAuth: AsnValue { return AsnValue(octetStringData: usmSecurityParametersAsnBlankAuth.asnData)
     }

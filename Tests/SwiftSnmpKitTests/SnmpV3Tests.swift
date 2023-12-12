@@ -18,14 +18,14 @@ class SnmpV3Tests: XCTestCase {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
-    func testV3one() throws {
+    func testV3one() async throws {
         let variableBinding = SnmpVariableBinding(oid: SnmpOid("1.3.6")!)
         guard let snmpV3Message = SnmpV3Message(engineId: "80000009034c710c19e30d", userName: "ciscouser", type: .getNextRequest, variableBindings: [variableBinding], engineBoots: 0, engineTime: 0) else {
             XCTFail()
             return
         }
-        let snmpV3Asn = snmpV3Message.asn
-        let data = snmpV3Asn.asnData
+        let snmpV3Asn = await snmpV3Message.asn
+        let data = await snmpV3Asn.asnData
         //sequence, snmp version, sequence, start of msgID
         //XCTAssert(data[0..<9] == "306402010330110204".hexstream!)
     }
@@ -64,9 +64,9 @@ class SnmpV3Tests: XCTestCase {
                  [Response To: 1]
                  [Time: 0.004505000 seconds]
      */
-    func testSnmpV31() throws {
+    func testSnmpV31() async throws {
         let data = "30818e0201033010020402d993b20202057804010002010304243022040b80000009034c710c19e30d0201000201000409636973636f75736572040004003051040b80000009034c710c19e30d0400a240020402d993b20201000201003032303006082b06010201010100042453473235302d303820382d506f7274204769676162697420536d61727420537769746368".hexstream!
-        guard let snmpMessageV3 = SnmpV3Message(data: data) else {
+        guard let snmpMessageV3 = await SnmpV3Message(data: data) else {
             XCTFail()
             return
         }
@@ -74,9 +74,9 @@ class SnmpV3Tests: XCTestCase {
         XCTAssert(snmpMessageV3.version == .v3)
     }
     
-    func testReport1() throws {
+    func testReport1() async throws {
         let data = "306d020103301002041814e0360202057804010002010304243022040b80000009034c710c19e30d0201000201000409636973636f75736572040004003030040b80000009034c710c19e30d0400a81f02041814e0360201000201003011300f060a2b060106030f01010100410101".hexstream!
-        guard let snmpMessageV3 = SnmpV3Message(data: data) else {
+        guard let snmpMessageV3 = await SnmpV3Message(data: data) else {
             XCTFail()
             return
         }
@@ -196,7 +196,7 @@ class SnmpV3Tests: XCTestCase {
                                 Value (Null)
                 [Response In: 12]*/
 
-    func testSha11() throws {
+    func testSha11() async throws {
         let password = "authkey1auth"
         let engineId = "80000009034c710c19e30d"
         guard var message = SnmpV3Message(engineId: engineId, userName: "ciscoauth", type: .getRequest, variableBindings: [SnmpVariableBinding(oid: SnmpOid("1.3.6.1.2.1.1.1.0")!)], authenticationType: .sha1, authPassword: password, engineBoots: 2, engineTime: 78016) else {
@@ -206,13 +206,13 @@ class SnmpV3Tests: XCTestCase {
         message.messageId = 2126458716
         message.maxSize = 65507
         message.snmpPdu.requestId = 1031539336
-        let asn = message.asnBlankAuth
+        let asn = await message.asnBlankAuth
         let authentication = SnmpV3Message.sha1Parameters(messageData: asn.asnData, password: password, engineId: engineId.hexstream!)
         print(asn)
         print(message)
         XCTAssert(authentication == Data([0x61,0x07,0x81,0x91,0x8e,0x18,0xec,0x89,0xab,0x1c,0x74,0xa0]))
     }
-    func testSha12() throws {
+    func testSha12() async throws {
         let password = "authkey1auth"
         let engineId = "80000009034c710c19e30d"
         guard var message = SnmpV3Message(engineId: engineId, userName: "ciscoauth", type: .getRequest, variableBindings: [SnmpVariableBinding(oid: SnmpOid("1.3.6.1.2.1.1.1.0")!)], authenticationType: .sha1, authPassword: password, engineBoots: 2, engineTime: 78016) else {
@@ -222,8 +222,8 @@ class SnmpV3Tests: XCTestCase {
         message.messageId = 2126458716
         message.maxSize = 65507
         message.snmpPdu.requestId = 1031539336
-        let asnBlank = message.asnBlankAuth
-        let asnReal = message.asn
+        let asnBlank = await message.asnBlankAuth
+        let asnReal = await message.asn
         guard case .sequence(let outerSequence) = asnReal else {
             XCTFail()
             return

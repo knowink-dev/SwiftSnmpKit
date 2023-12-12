@@ -12,7 +12,7 @@ import NIOPosix
 /// SnmpSender is a singleton class which handles sending and receiving SNMP messages
 /// It maintains several internal state tables to record SNMP
 /// EngineIDs, EngineBoots, and BootDates gathered from SNMPv3 reports
-public class SnmpSender/*: ChannelInboundHandler*/ {
+public actor SnmpSender/*: ChannelInboundHandler*/ {
     public typealias InboundIn = AddressedEnvelope<ByteBuffer>
     
     static let snmpPort = 161
@@ -75,15 +75,29 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let requestId = message.requestId
         snmpRequests[requestId] = continuation
         Task.detached {
-            SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-            SnmpError.debug("sleep complete")
-            if let continuation = self.snmpRequests.removeValue(forKey: requestId) {
-                continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+            do {
+                SnmpError.debug("task detached starting")
+                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+                SnmpError.debug("sleep complete")
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+                }
+                SnmpError.debug("continuation complete")
+            } catch {
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
+                }
             }
-            SnmpError.debug("continuation complete")
         }
         SnmpError.debug("sent complete")
+    }
+    
+    func removeRequest(forKey key: Int32) -> CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>? {
+        snmpRequests.removeValue(forKey: key)
+    }
+    
+    func updateLocalizedKeys(messageID: Int32, withData data: [UInt8]?) {
+        localizedKeys[messageID] = data
     }
     
     /// After sending a message this internal function triggers a timeout
@@ -95,13 +109,19 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let requestId = message.requestId
         snmpRequests[requestId] = continuation
         Task.detached {
-            SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-            SnmpError.debug("sleep complete")
-            if let continuation = self.snmpRequests.removeValue(forKey: requestId) {
-                continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+            do {
+                SnmpError.debug("task detached starting")
+                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+                SnmpError.debug("sleep complete")
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+                }
+                SnmpError.debug("continuation complete")
+            } catch {
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
+                }
             }
-            SnmpError.debug("continuation complete")
         }
         SnmpError.debug("sent complete")
     }
@@ -115,13 +135,19 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let requestId = message.messageId
         snmpRequests[requestId] = continuation
         Task.detached {
-            SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-            SnmpError.debug("sleep complete")
-            if let continuation = self.snmpRequests.removeValue(forKey: requestId) {
-                continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+            do {
+                SnmpError.debug("task detached starting")
+                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+                SnmpError.debug("sleep complete")
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+                }
+                SnmpError.debug("continuation complete")
+            } catch {
+                if let continuation = await self.removeRequest(forKey: requestId) {
+                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
+                }
             }
-            SnmpError.debug("continuation complete")
         }
         SnmpError.debug("sent complete")
     }
@@ -377,7 +403,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
             return .failure(SnmpError.unexpectedSnmpPdu)
         }
 
-        let data = snmpMessage.asnData
+        let data = await snmpMessage.asnData
         let buffer = channel.allocator.buffer(bytes: data)
         let envelope = AddressedEnvelope(remoteAddress: remoteAddress, data: buffer)
         do {
@@ -405,6 +431,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let result = channel.writeAndFlush(envelope)
         //try channel.closeFuture.wait()
     }
+    
     deinit {
         SnmpError.log("Deinitializing SnmpSender Singleton")
         do {

@@ -18,7 +18,7 @@ class SnmpReceiver: ChannelInboundHandler {
     deinit {
         SnmpError.debug("deinitializing SnmpReceiver")
     }
-    public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+    public func channelRead(context: ChannelHandlerContext, data: NIOAny) async {
         let addressedEnvelope = self.unwrapInboundIn(data)
         SnmpError.debug("Recieved data from \(addressedEnvelope.remoteAddress)")
         var buffer = addressedEnvelope.data
@@ -33,13 +33,13 @@ class SnmpReceiver: ChannelInboundHandler {
         }
         if let snmpMessage = SnmpV1Message(data: Data(data)) {
             SnmpError.debug(snmpMessage.debugDescription)
-            snmpSender.received(message: snmpMessage)
+            await snmpSender.received(message: snmpMessage)
         } else if let snmpMessage = SnmpV2Message(data: Data(data)) {
             SnmpError.debug(snmpMessage.debugDescription)
-            snmpSender.received(message: snmpMessage)
-        } else if let snmpMessage = SnmpV3Message(data: Data(data)) {
+            await snmpSender.received(message: snmpMessage)
+        } else if let snmpMessage = await SnmpV3Message(data: Data(data)) {
             SnmpError.debug(snmpMessage.debugDescription)
-            snmpSender.received(message: snmpMessage)
+            await snmpSender.received(message: snmpMessage)
         } else {
             SnmpError.log("Unable to decode snmp message from \(addressedEnvelope.remoteAddress) data: \(data.hexdump)")
             return
