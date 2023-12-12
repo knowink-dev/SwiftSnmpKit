@@ -10,8 +10,10 @@ import Foundation
 
 
 /// Structure for the SNMP Message
-public struct SnmpV1Message: AsnData, CustomDebugStringConvertible {
-    
+public struct SnmpV1Message: AsnData, CustomDebugStringConvertible, SnmpMessage {
+    func requestID() -> Int32 { requestId }
+    func errorStat() -> Int { errorStatus }
+    func varBinds() -> [SnmpVariableBinding] { variableBindings }
     
     /// SNMP version.  .v1 in this case.
     public private(set) var version: SnmpVersion

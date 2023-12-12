@@ -8,5 +8,5 @@
 import Foundation
 
 internal protocol AsnData {
-    var asnData: Data { get async }
+    var asnData: Data { get }
 }

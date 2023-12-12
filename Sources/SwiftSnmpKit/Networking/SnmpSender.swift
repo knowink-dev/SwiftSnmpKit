@@ -12,7 +12,7 @@ import NIOPosix
 /// SnmpSender is a singleton class which handles sending and receiving SNMP messages
 /// It maintains several internal state tables to record SNMP
 /// EngineIDs, EngineBoots, and BootDates gathered from SNMPv3 reports
-public actor SnmpSender/*: ChannelInboundHandler*/ {
+public class SnmpSender/*: ChannelInboundHandler*/ {
     public typealias InboundIn = AddressedEnvelope<ByteBuffer>
     
     static let snmpPort = 161
@@ -66,199 +66,122 @@ public actor SnmpSender/*: ChannelInboundHandler*/ {
         }*/
         self.channel = channel
     }
-    /// After sending a message this internal function triggers a timeout
-    /// - Parameters:
-    ///   - message: SNMPv1 message that was sent
-    ///   - continuation: The continuation to trigger
-    ///   Warning: triggering the same continuation twice will trigger a crash.
-    internal func sent(message: SnmpV1Message, continuation: CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>) {
-        let requestId = message.requestId
-        snmpRequests[requestId] = continuation
-        Task.detached {
-            do {
-                SnmpError.debug("task detached starting")
-                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-                SnmpError.debug("sleep complete")
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
-                }
-                SnmpError.debug("continuation complete")
-            } catch {
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
-                }
-            }
-        }
-        SnmpError.debug("sent complete")
-    }
     
-    func removeRequest(forKey key: Int32) -> CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>? {
-        snmpRequests.removeValue(forKey: key)
-    }
-    
-    func updateLocalizedKeys(messageID: Int32, withData data: [UInt8]?) {
-        localizedKeys[messageID] = data
+    deinit {
+        SnmpError.log("Deinitializing SnmpSender Singleton")
+        do {
+            try self.group.syncShutdownGracefully()
+        } catch {}
     }
     
     /// After sending a message this internal function triggers a timeout
     /// - Parameters:
-    ///   - message: SNMPv2 message that was sent
+    ///   - message: SNMP message that was sent
     ///   - continuation: The continuation to trigger
     ///   Warning: triggering the same continuation twice will trigger a crash.
-    internal func sent(message: SnmpV2Message, continuation: CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>) {
-        let requestId = message.requestId
+    internal func sent(message: SnmpMessage, continuation: CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>) {
+        let requestId = message.requestID()
         snmpRequests[requestId] = continuation
         Task.detached {
-            do {
-                SnmpError.debug("task detached starting")
-                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-                SnmpError.debug("sleep complete")
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
-                }
-                SnmpError.debug("continuation complete")
-            } catch {
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
-                }
+            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+            self.triggerTimeoutForRequestIfNeeded(id: requestId)
+        }
+    }
+    
+    func triggerTimeoutForRequestIfNeeded(id: Int32) {
+        if let continuation = snmpRequests.removeValue(forKey: id) {
+            continuation.resume(with: .success(.failure(SnmpError.noResponse)))
+        }
+    }
+    
+    internal func received(message: SnmpMessage) {
+        switch message.version {
+        case .v1, .v2c:
+            guard let continuation = snmpRequests[message.requestID()] else {
+                return
             }
-        }
-        SnmpError.debug("sent complete")
-    }
-    
-    /// After sending a message this internal function triggers a timeout
-    /// - Parameters:
-    ///   - message: SNMPv3 message that was sent
-    ///   - continuation: The continuation to trigger
-    ///   Warning: triggering the same continuation twice will trigger a crash.
-    internal func sent(message: SnmpV3Message, continuation: CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>) {
-        let requestId = message.messageId
-        snmpRequests[requestId] = continuation
-        Task.detached {
-            do {
-                SnmpError.debug("task detached starting")
-                try await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
-                SnmpError.debug("sleep complete")
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.noResponse)))
-                }
-                SnmpError.debug("continuation complete")
-            } catch {
-                if let continuation = await self.removeRequest(forKey: requestId) {
-                    continuation.resume(with: .success(.failure(SnmpError.sleepFailed)))
-                }
-            }
-        }
-        SnmpError.debug("sent complete")
-    }
-    
-    internal func received(message: SnmpV1Message) {
-        guard let continuation = snmpRequests[message.requestId] else {
-            SnmpError.log("unable to find snmp request \(message.requestId)")
-            return
-        }
-        guard message.errorStatus == 0 && message.variableBindings.count > 0 else {
-            snmpRequests[message.requestId] = nil
-            SnmpError.debug("received SNMP error for request \(message.requestId)")
-            continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
-            return
-        }
-        var output = ""
-        for variableBinding in message.variableBindings {
-            output.append(variableBinding.description)
-        }
-        snmpRequests[message.requestId] = nil
-        SnmpError.debug("about to continue \(continuation)")
-        continuation.resume(with: .success(.success(message.variableBindings.first!)))
-    }
-    
-    internal func received(message: SnmpV2Message) {
-        guard let continuation = snmpRequests[message.requestId] else {
-            SnmpError.log("unable to find snmp request \(message.requestId)")
-            return
-        }
-        guard message.errorStatus == 0 && message.variableBindings.count > 0 else {
-            snmpRequests[message.requestId] = nil
-            SnmpError.debug("received SNMP error for request \(message.requestId)")
-            continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
-            return
-        }
-        var output = ""
-        for variableBinding in message.variableBindings {
-            output.append(variableBinding.description)
-        }
-        snmpRequests[message.requestId] = nil
-        SnmpError.debug("about to continue \(continuation)")
-        continuation.resume(with: .success(.success(message.variableBindings.first!)))
-    }
-    
-    internal func received(message: SnmpV3Message) {
-        guard let continuation = snmpRequests[message.messageId] else {
-            SnmpError.log("unable to find snmp request \(message.messageId)")
-            return
-        }
-        snmpRequests[message.messageId] = nil
-        let snmpPdu = message.snmpPdu
-        guard snmpPdu.errorStatus == 0 && snmpPdu.variableBindings.count > 0 else {
-            SnmpError.debug("received SNMP error for request \(message.messageId)")
-            continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
-            return
-        }
-        guard snmpPdu.pduType != .snmpReport else {
-            guard let variableBinding = snmpPdu.variableBindings.first else {
-                SnmpError.log("Unexpectedly received SNMPv3 report without a variable binding \(message)")
+            guard message.errorStat() == 0 && message.varBinds().count > 0 else {
+                snmpRequests[message.requestID()] = nil
                 continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
                 return
             }
-            switch variableBinding.oid {
-            case SnmpOid("1.3.6.1.6.3.15.1.1.1.0"):
-                continuation.resume(with: .success(.failure(SnmpError.snmpUnknownSecurityLevel)))
-            case SnmpOid("1.3.6.1.6.3.15.1.1.2.0"):
-                let engineBoots = message.engineBoots
-                let engineTime = message.engineTime
-                let engineBootTime = Date(timeIntervalSinceNow: -Double(engineTime))
-                if let agentHostname = self.snmpRequestToHost[message.messageId] {
-                    self.snmpEngineBoots[agentHostname] = engineBoots
-                    self.snmpEngineBootDate[agentHostname] = engineBootTime
-                }
-                continuation.resume(with: .success(.failure(SnmpError.snmpNotInTimeWindow)))
-            case SnmpOid("1.3.6.1.6.3.15.1.1.3.0"):
-                continuation.resume(with: .success(.failure(SnmpError.snmpUnknownUser)))
-            case SnmpOid("1.3.6.1.6.3.15.1.1.4.0"):
-                if let host = snmpRequestToHost[message.messageId] {
-                    if !message.engineId.isEmpty {
-                        snmpHostToEngineId[host] = message.engineId.hexString
-                    }
-                }
-                continuation.resume(with: .success(.failure(SnmpError.snmpUnknownEngineId)))
-            case SnmpOid("1.3.6.1.6.3.15.1.1.5.0"):
-                continuation.resume(with: .success(.failure(SnmpError.snmpAuthenticationError)))
-            case SnmpOid("1.3.6.1.6.3.15.1.1.6.0"):
-                continuation.resume(with: .success(.failure(SnmpError.snmpDecryptionError)))
-            default:
-                SnmpError.log("Received SNMP repsonse with unexpected OID: \(message)")
-                continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
+            var output = ""
+            for variableBinding in message.varBinds() {
+                output.append(variableBinding.description)
             }
-            return
+            snmpRequests[message.requestID()] = nil
+            continuation.resume(with: .success(.success(message.varBinds().first!)))
+        case .v3:
+            guard let message = message as? SnmpV3Message else { return }
+            guard let continuation = snmpRequests[message.messageId] else {
+                return
+            }
+            snmpRequests[message.messageId] = nil
+            let snmpPdu = message.snmpPdu
+            guard snmpPdu.errorStatus == 0 && snmpPdu.variableBindings.count > 0 else {
+                continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
+                return
+            }
+            guard snmpPdu.pduType != .snmpReport else {
+                guard let variableBinding = snmpPdu.variableBindings.first else {
+                    continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
+                    return
+                }
+                switch variableBinding.oid {
+                case SnmpOid("1.3.6.1.6.3.15.1.1.1.0"):
+                    continuation.resume(with: .success(.failure(SnmpError.snmpUnknownSecurityLevel)))
+                case SnmpOid("1.3.6.1.6.3.15.1.1.2.0"):
+                    let engineBoots = message.engineBoots
+                    let engineTime = message.engineTime
+                    let engineBootTime = Date(timeIntervalSinceNow: -Double(engineTime))
+                    if let agentHostname = self.snmpRequestToHost[message.messageId] {
+                        self.snmpEngineBoots[agentHostname] = engineBoots
+                        self.snmpEngineBootDate[agentHostname] = engineBootTime
+                    }
+                    continuation.resume(with: .success(.failure(SnmpError.snmpNotInTimeWindow)))
+                case SnmpOid("1.3.6.1.6.3.15.1.1.3.0"):
+                    continuation.resume(with: .success(.failure(SnmpError.snmpUnknownUser)))
+                case SnmpOid("1.3.6.1.6.3.15.1.1.4.0"):
+                    if let host = snmpRequestToHost[message.messageId] {
+                        if !message.engineId.isEmpty {
+                            snmpHostToEngineId[host] = message.engineId.hexString
+                        }
+                    }
+                    continuation.resume(with: .success(.failure(SnmpError.snmpUnknownEngineId)))
+                case SnmpOid("1.3.6.1.6.3.15.1.1.5.0"):
+                    continuation.resume(with: .success(.failure(SnmpError.snmpAuthenticationError)))
+                case SnmpOid("1.3.6.1.6.3.15.1.1.6.0"):
+                    continuation.resume(with: .success(.failure(SnmpError.snmpDecryptionError)))
+                default:
+                    continuation.resume(with: .success(.failure(SnmpError.snmpResponseError)))
+                }
+                return
+            }
+            var output = ""
+            for variableBinding in snmpPdu.variableBindings {
+                output.append(variableBinding.description)
+            }
+            snmpRequests[message.messageId] = nil
+            snmpRequestToHost[message.messageId] = nil
+            SnmpError.debug("about to continue \(continuation)")
+            continuation.resume(with: .success(.success(snmpPdu.variableBindings.first!)))
         }
-        var output = ""
-        for variableBinding in snmpPdu.variableBindings {
-            output.append(variableBinding.description)
-        }
-        snmpRequests[message.messageId] = nil
-        snmpRequestToHost[message.messageId] = nil
-        SnmpError.debug("about to continue \(continuation)")
-        continuation.resume(with: .success(.success(snmpPdu.variableBindings.first!)))
     }
     
-    /// Sends a SNMPv1 Get request asynchronously and adds the requestID to the list of expected responses
+    /// Sends a SNMPv1 or SNMPv2c Get request asynchronously and adds the requestID to the list of expected responses
     /// - Parameters:
     ///   - host: IPv4, IPv6, or hostname in String format
     ///   - command: A SnmpPduType.  At this time we only support .getRequest and .getNextRequest
     ///   - community: SNMPv2c community in String format
     ///   - oid: SnmpOid to be requested
     /// - Returns: Result(SnmpVariableBinding or SnmpError)
-    public func sendV1(host: String, command: SnmpPduType, community: String, oid: String) async -> Result<SnmpVariableBinding,Error> {
+    public func sendV1OrV2(
+        host: String,
+        command: SnmpPduType,
+        community: String,
+        oid: String,
+        isV1: Bool
+    ) async -> Result<SnmpVariableBinding,Error> {
         guard let oid = SnmpOid(oid) else {
             return .failure(SnmpError.invalidOid)
         }
@@ -266,7 +189,9 @@ public actor SnmpSender/*: ChannelInboundHandler*/ {
         guard command == .getRequest || command == .getNextRequest else {
             return .failure(SnmpError.unsupportedType)
         }
-        let snmpMessage = SnmpV1Message(community: community, command: command, oid: oid)
+        let snmpMessage: SnmpMessage = isV1 ?
+            SnmpV1Message(community: community, command: command, oid: oid) :
+            SnmpV2Message(community: community, command: command, oid: oid)
         guard let remoteAddress = try? SocketAddress(ipAddress: host, port: SnmpSender.snmpPort) else {
             return .failure(SnmpError.invalidAddress)
         }
@@ -280,42 +205,7 @@ public actor SnmpSender/*: ChannelInboundHandler*/ {
         }
         return await withCheckedContinuation { continuation in
             //snmpRequests[snmpMessage.requestId] = continuation.resume(with:)
-            SnmpError.debug("adding snmpRequests \(snmpMessage.requestId)")
-            sent(message: snmpMessage, continuation: continuation)
-            //snmpRequests[snmpMessage.requestId] = continuation
-        }
-    }
-    
-    /// Sends a SNMPv2c Get request asynchronously and adds the requestID to the list of expected responses
-    /// - Parameters:
-    ///   - host: IPv4, IPv6, or hostname in String format
-    ///   - command: A SnmpPduType.  At this time we only support .getRequest and .getNextRequest
-    ///   - community: SNMPv2c community in String format
-    ///   - oid: SnmpOid to be requested
-    /// - Returns: Result(SnmpVariableBinding or SnmpError)
-    public func send(host: String, command: SnmpPduType, community: String, oid: String) async -> Result<SnmpVariableBinding,Error> {
-        guard let oid = SnmpOid(oid) else {
-            return .failure(SnmpError.invalidOid)
-        }
-        // At this time we only support SNMP get and getNext
-        guard command == .getRequest || command == .getNextRequest else {
-            return .failure(SnmpError.unsupportedType)
-        }
-        let snmpMessage = SnmpV2Message(community: community, command: command, oid: oid)
-        guard let remoteAddress = try? SocketAddress(ipAddress: host, port: SnmpSender.snmpPort) else {
-            return .failure(SnmpError.invalidAddress)
-        }
-        let data = snmpMessage.asnData
-        let buffer = channel.allocator.buffer(bytes: data)
-        let envelope = AddressedEnvelope(remoteAddress: remoteAddress, data: buffer)
-        do {
-            let _ = try await channel.writeAndFlush(envelope)
-        } catch (let error) {
-            return .failure(error)
-        }
-        return await withCheckedContinuation { continuation in
-            //snmpRequests[snmpMessage.requestId] = continuation.resume(with:)
-            SnmpError.debug("adding snmpRequests \(snmpMessage.requestId)")
+            SnmpError.debug("adding snmpRequests \(snmpMessage.requestID())")
             sent(message: snmpMessage, continuation: continuation)
             //snmpRequests[snmpMessage.requestId] = continuation
         }
@@ -331,7 +221,7 @@ public actor SnmpSender/*: ChannelInboundHandler*/ {
     ///   - tempAuthenticationType: SNMPv3 authentication type
     ///   - tempPassword: SNMPv3 password if needed, or nil
     /// - Returns: Result(SnmpVariableBinding or SnmpError)
-    public func send(host: String, userName: String, pduType: SnmpPduType, oid: String, authenticationType: SnmpV3Authentication = .noAuth, authPassword: String? = nil, privPassword: String? = nil) async -> Result<SnmpVariableBinding,Error> {
+    public func sendV3(host: String, userName: String, pduType: SnmpPduType, oid: String, authenticationType: SnmpV3Authentication = .noAuth, authPassword: String? = nil, privPassword: String? = nil) async -> Result<SnmpVariableBinding,Error> {
         guard pduType == .getRequest || pduType == .getNextRequest else {
             return .failure(SnmpError.unsupportedType)
         }
@@ -415,29 +305,6 @@ public actor SnmpSender/*: ChannelInboundHandler*/ {
         return await withCheckedContinuation { continuation in
             SnmpError.debug("adding snmpRequests \(snmpMessage.messageId)")
             sent(message: snmpMessage, continuation: continuation)
-        }
-    }
-
-    internal func sendData(host: String, port: Int, data: Data) throws {
-        guard let shared = SnmpSender.shared else {
-            throw SnmpError.otherError
-        }
-        let buffer = channel.allocator.buffer(bytes: data)
-        
-        guard let remoteAddress = try? SocketAddress(ipAddress: host, port: port) else {
-            throw SnmpError.otherError
-        }
-        let envelope = AddressedEnvelope(remoteAddress: remoteAddress, data: buffer)
-        let result = channel.writeAndFlush(envelope)
-        //try channel.closeFuture.wait()
-    }
-    
-    deinit {
-        SnmpError.log("Deinitializing SnmpSender Singleton")
-        do {
-            try self.group.syncShutdownGracefully()
-        } catch {
-            SnmpError.log("Unable to shutdown NIO gracefully: \(error.localizedDescription)")
         }
     }
 }
