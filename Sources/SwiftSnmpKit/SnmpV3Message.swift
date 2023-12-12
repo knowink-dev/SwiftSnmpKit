@@ -10,7 +10,10 @@ import Crypto
 import CryptoSwift
 
 /// Structure for a SNMPv3 Message.
-public struct SnmpV3Message: CustomDebugStringConvertible {
+public struct SnmpV3Message: CustomDebugStringConvertible, SnmpMessage {
+    func requestID() -> Int32 { messageId }
+    func errorStat() -> Int { snmpPdu.errorStatus }
+    func varBinds() -> [SnmpVariableBinding] { snmpPdu.variableBindings }
     
     /// SNMP version.  .v3  for this structure.
     public private(set) var version: SnmpVersion = .v3
