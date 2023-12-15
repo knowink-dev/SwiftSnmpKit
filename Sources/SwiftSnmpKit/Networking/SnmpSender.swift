@@ -39,7 +39,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
     /// This is a record of outstanding SNMP requests and the continuation
     /// that must be called when the reply is received.  The continuation
     /// could also be triggered by a timeout.  Triggering the same continuation twice will trigger a crash.
-    private var snmpRequests: [Int32:CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>] = [:]
+    internal private(set) var snmpRequests: [Int32:CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>] = [:]
     
     func setSNMPRequest(
         _ continuation: CheckedContinuation<Result<SnmpVariableBinding, Error>, Never>,
@@ -117,7 +117,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
             SnmpError.debug("task detached starting")
             try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
             SnmpError.debug("sleep complete")
-            if let continuation = self.snmpRequests.removeValue(forKey: requestId) {
+            if let continuation = self.removeSNMPRequest(messageID: requestId) {
                 continuation.resume(with: .success(.failure(SnmpError.noResponse)))
             }
             SnmpError.debug("continuation complete")
@@ -137,7 +137,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
             SnmpError.debug("task detached starting")
             try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
             SnmpError.debug("sleep complete")
-            if let continuation = self.snmpRequests.removeValue(forKey: requestId) {
+            if let continuation = self.removeSNMPRequest(messageID: requestId) {
                 continuation.resume(with: .success(.failure(SnmpError.noResponse)))
             }
             SnmpError.debug("continuation complete")
