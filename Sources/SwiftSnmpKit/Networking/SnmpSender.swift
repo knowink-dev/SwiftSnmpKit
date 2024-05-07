@@ -31,7 +31,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
     /// Must be greater than 0.  SNMPv3 send requests sometimes
     /// require 3 attempts, so the client-facing timeout may be 3 times
     /// this value.
-    public static var snmpTimeout: UInt64 = 5
+    public static var snmpTimeout: Double = 0.1
 
     // maps messageID to decryption key
     internal var localizedKeys: [Int32:[UInt8]] = [:]
@@ -95,7 +95,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         setSNMPRequest(continuation, messageID: requestId)
         Task.detached {
             SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(SnmpSender.snmpTimeout * 1_000_000_000))
             SnmpError.debug("sleep complete")
             if let continuation = self.removeSNMPRequest(messageID: requestId) {
                 continuation.resume(with: .success(.failure(SnmpError.noResponse)))
@@ -115,7 +115,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         setSNMPRequest(continuation, messageID: requestId)
         Task.detached {
             SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(SnmpSender.snmpTimeout * 1_000_000_000))
             SnmpError.debug("sleep complete")
             if let continuation = self.removeSNMPRequest(messageID: requestId) {
                 continuation.resume(with: .success(.failure(SnmpError.noResponse)))
@@ -135,7 +135,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         setSNMPRequest(continuation, messageID: requestId)
         Task.detached {
             SnmpError.debug("task detached starting")
-            try? await Task.sleep(nanoseconds: SnmpSender.snmpTimeout * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(SnmpSender.snmpTimeout * 1_000_000_000))
             SnmpError.debug("sleep complete")
             if let continuation = self.removeSNMPRequest(messageID: requestId) {
                 continuation.resume(with: .success(.failure(SnmpError.noResponse)))
@@ -382,7 +382,7 @@ public class SnmpSender/*: ChannelInboundHandler*/ {
         let dateInterval = DateInterval(start: bootDate, end: Date())
         let engineTime = Int(dateInterval.duration)
         
-        guard var snmpMessage = SnmpV3Message(engineId: engineId, userName: userName, type: pduType, variableBindings: [variableBinding], authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword, engineBoots: engineBoots, engineTime: engineTime) else {
+        guard let snmpMessage = SnmpV3Message(engineId: engineId, userName: userName, type: pduType, variableBindings: [variableBinding], authenticationType: authenticationType, authPassword: authPassword, privPassword: privPassword, engineBoots: engineBoots, engineTime: engineTime) else {
             return .failure(SnmpError.unexpectedSnmpPdu)
         }
 

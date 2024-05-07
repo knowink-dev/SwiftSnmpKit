@@ -326,7 +326,7 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
     
     /// Outputs the ASN.1 encoding for the security parameters field
     private var usmSecurityParametersAsn: AsnValue {
-        let authenticationParametersAsn: AsnValue
+//        let authenticationParametersAsn: AsnValue // .... Why is this here?
         switch self.authenticationType {
         case .noAuth:
             return AsnValue.sequence([engineIdAsn,engineBootsAsn,engineTimeAsn,userNameAsn,blankAuthenticationParametersAsn,privacyParametersAsn])
@@ -467,7 +467,7 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
         }
         // utf8 string decoding should never fail
         self.userName = String(data: usernameData, encoding: .utf8)!
-        guard case .octetString(let msgAuthenticationParametersData) = securityParameters[4] else {
+        guard case .octetString/*(let msgAuthenticationParametersData) ...why is this here? */= securityParameters[4] else {
             SnmpError.log("Expected msgAuthenticationParametersData octetString got \(securityParameters[4])")
             return nil
         }
@@ -519,7 +519,7 @@ public struct SnmpV3Message: CustomDebugStringConvertible {
             SnmpError.log("engineIds do not match! \(engineId2Data) \(engineIdOctets)")
             return nil
         }
-        guard case .octetString(let contextNameData) = msgData[1] else {
+        guard case .octetString/*(let contextNameData) ....why is this here? */ = msgData[1] else {
             SnmpError.log("contextName expected octetString got \(msgData[1])")
             return nil
         }
